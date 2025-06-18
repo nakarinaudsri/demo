@@ -3,6 +3,7 @@ package external
 import (
 	"fmt"
 	"go-starter-api/internal/customer"
+	"go-starter-api/internal/events"
 	"go-starter-api/internal/userprofile"
 	"go-starter-api/pkg/env"
 
@@ -46,4 +47,5 @@ func PublicRoutes(app *fiber.App, db *gorm.DB, ai appinsightsx.Appinsightsx, htt
 
 	customer.Router(routerV1, db, ai)
 	userprofile.Router(routerV1, db, ai, http_base)
+	events.Router(routerV1, db, ai)
 }

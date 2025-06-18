@@ -9,20 +9,14 @@ import (
 	"go-stater-listener/domain/model"
 	"go-stater-listener/pkg/env"
 	"go-stater-listener/pkg/utils"
-	"runtime/debug"
 
 	"net/http"
 
-	bpLogCenter "gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/log_center/logx"
-	bpLogCenterModel "gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/log_center/model"
-
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 	"gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/service_bus/topic"
 )
 
 type serviceBus struct {
-	logM  bpLogCenter.LogCenter
 	topic *topic.Topic
 }
 
@@ -30,13 +24,13 @@ type ServiceBus interface {
 	SubscriptionSuccess()
 }
 
-func NewServiceBus(logM bpLogCenter.LogCenter) ServiceBus {
+func NewServiceBus() ServiceBus {
 	t := topic.New()
-	logM.Info(bpLogCenterModel.LoggerRequest{
-		Tags:    utils.TAGS_SERVICE_NEW_SERVICE,
-		Process: utils.PROCESS_START_PROJECT,
-	})
-	return serviceBus{logM, t}
+	// logM.Info(bpLogCenterModel.LoggerRequest{
+	// 	Tags:    utils.TAGS_SERVICE_NEW_SERVICE,
+	// 	Process: utils.PROCESS_START_PROJECT,
+	// })
+	return serviceBus{t}
 }
 
 func (s serviceBus) SubscriptionSuccess() {
@@ -96,27 +90,90 @@ func (s serviceBus) CallProcess(message topic.MessageResponse) (als model.Appins
 		}
 		defer res.Body.Close()
 
-		fmt.Println("API Response:", res)
+		fmt.Println("Event created successfully")
 
 	case "event_updated":
-		req := model.RequestEventCreate{}
+		req := model.RequestEventUpdated{}
 		err = json.Unmarshal(message.Data, &req)
 		if err != nil {
 			errProp = utils.ErrorData(err)
 			return
 		}
 
-		fmt.Println("event_updated:", req)
+		// Simulate sending the event data to an external API
+		url := fmt.Sprintf("%s/events/%d", env.Env().API_1, req.ID)
+		eventData := map[string]interface{}{
+			"eventName": req.EventName,
+			"price":     req.Price,
+		}
+
+		body, err := json.Marshal(eventData)
+		if err != nil {
+			errProp = utils.ErrorData(err)
+			return
+		}
+
+		header := http.Header{
+			"Accept":       []string{"application/json;odata=verbose"},
+			"Content-Type": []string{"application/json"},
+		}
+
+		client := &http.Client{}
+		reqH, err := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
+		if err != nil {
+			fmt.Println("Error creating request:", err)
+		}
+
+		reqH.Header = header
+
+		res, err := client.Do(reqH)
+		if err != nil {
+			fmt.Println("Error making request:", err)
+		}
+		defer res.Body.Close()
+
+		fmt.Println("Event updated successfully")
 
 	case "participant_enrolled":
-		req := model.RequestEventCreate{}
+		req := model.RequestParticipantEnrolled{}
 		err = json.Unmarshal(message.Data, &req)
 		if err != nil {
 			errProp = utils.ErrorData(err)
 			return
 		}
 
-		fmt.Println("participant_enrolled:", req)
+		// Simulate sending the event data to an external API
+		url := fmt.Sprintf("%s/events/%d/enroll", env.Env().API_1, req.ID)
+		eventData := map[string]interface{}{
+			"participantIds": req.ParticipantIDs,
+		}
+
+		body, err := json.Marshal(eventData)
+		if err != nil {
+			errProp = utils.ErrorData(err)
+			return
+		}
+
+		header := http.Header{
+			"Accept":       []string{"application/json;odata=verbose"},
+			"Content-Type": []string{"application/json"},
+		}
+
+		client := &http.Client{}
+		reqH, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			fmt.Println("Error creating request:", err)
+		}
+
+		reqH.Header = header
+
+		res, err := client.Do(reqH)
+		if err != nil {
+			fmt.Println("Error making request:", err)
+		}
+		defer res.Body.Close()
+
+		fmt.Println("Participant enrolled successfully")
 
 	default:
 		errProp = utils.ErrorData(errors.New("call process event type not found"))
@@ -127,130 +184,132 @@ func (s serviceBus) CallProcess(message topic.MessageResponse) (als model.Appins
 }
 
 func (s serviceBus) Callback(message topic.MessageResponse, receiver *azservicebus.Receiver, msg *azservicebus.ReceivedMessage) error {
-	defer s.HandlePanic(message)
-	als, errProp := s.CallProcess(message)
-	if errProp.Error != nil {
-		deadLetterOptions := &azservicebus.DeadLetterOptions{
-			ErrorDescription: to.Ptr(errProp.Error.Error()),
-		}
-		receiver.DeadLetterMessage(context.TODO(), msg, deadLetterOptions)
+	s.CallProcess(message)
+	// defer s.HandlePanic(message)
+	// als, errProp := s.CallProcess(message)
+	// if errProp.Error != nil {
+	// 	deadLetterOptions := &azservicebus.DeadLetterOptions{
+	// 		ErrorDescription: to.Ptr(errProp.Error.Error()),
+	// 	}
+	// 	receiver.DeadLetterMessage(context.TODO(), msg, deadLetterOptions)
 
-		err := s.AppinsightMonitorLog(als, message, errProp)
-		if err != nil {
-			s.logM.Error(bpLogCenterModel.LoggerRequest{
-				Tags:    utils.TAGS_SERVICE_CALLBACK,
-				Process: utils.PROCESS_PANIC_LOG,
-				Error:   fmt.Sprintf("Error AppinsightMonitorLog: %v", err),
-			})
-		}
-	} else {
-		err := s.AppinsightMonitorLog(als, message, model.ErrorProps{})
-		if err != nil {
-			s.logM.Error(bpLogCenterModel.LoggerRequest{
-				Tags:    utils.TAGS_SERVICE_CALLBACK,
-				Process: utils.PROCESS_PANIC_LOG,
-				Error:   fmt.Sprintf("Error AppinsightMonitorLog: %v", err),
-			})
-		}
-	}
+	// 	err := s.AppinsightMonitorLog(als, message, errProp)
+	// 	if err != nil {
+	// 		s.logM.Error(bpLogCenterModel.LoggerRequest{
+	// 			Tags:    utils.TAGS_SERVICE_CALLBACK,
+	// 			Process: utils.PROCESS_PANIC_LOG,
+	// 			Error:   fmt.Sprintf("Error AppinsightMonitorLog: %v", err),
+	// 		})
+	// 	}
+	// } else {
+	// 	err := s.AppinsightMonitorLog(als, message, model.ErrorProps{})
+	// 	if err != nil {
+	// 		s.logM.Error(bpLogCenterModel.LoggerRequest{
+	// 			Tags:    utils.TAGS_SERVICE_CALLBACK,
+	// 			Process: utils.PROCESS_PANIC_LOG,
+	// 			Error:   fmt.Sprintf("Error AppinsightMonitorLog: %v", err),
+	// 		})
+	// 	}
+	// }
 
 	err := receiver.CompleteMessage(context.Background(), msg, &azservicebus.CompleteMessageOptions{})
 	if err != nil {
-		s.logM.Error(bpLogCenterModel.LoggerRequest{
-			Tags:    utils.TAGS_SERVICE_CALLBACK,
-			Process: utils.PROCESS_COMPLETE_ERROR,
-			Error:   fmt.Sprintf("[Subscription] Failed to complete message: %v", err),
-		})
+		// s.logM.Error(bpLogCenterModel.LoggerRequest{
+		// 	Tags:    utils.TAGS_SERVICE_CALLBACK,
+		// 	Process: utils.PROCESS_COMPLETE_ERROR,
+		// 	Error:   fmt.Sprintf("[Subscription] Failed to complete message: %v", err),
+		// })
+		fmt.Println("[Subscription] Failed to complete message:", err)
 	}
 	return nil
 }
 
-func (s serviceBus) HandlePanic(message topic.MessageResponse) {
-	var msg map[string]interface{}
-	err := json.Unmarshal(message.Data, &msg)
-	if err != nil {
-		s.logM.Error(bpLogCenterModel.LoggerRequest{
-			Tags:    utils.TAGS_PANIC,
-			Process: utils.PROCESS_PANIC_LOG,
-			Error:   fmt.Sprintf("Error HandlePanic: %v", err),
-		})
-	}
+// func (s serviceBus) HandlePanic(message topic.MessageResponse) {
+// 	var msg map[string]interface{}
+// 	err := json.Unmarshal(message.Data, &msg)
+// 	if err != nil {
+// 		s.logM.Error(bpLogCenterModel.LoggerRequest{
+// 			Tags:    utils.TAGS_PANIC,
+// 			Process: utils.PROCESS_PANIC_LOG,
+// 			Error:   fmt.Sprintf("Error HandlePanic: %v", err),
+// 		})
+// 	}
 
-	if r := recover(); r != nil {
-		msgData := struct {
-			Event   string
-			Message interface{} `json:"payload"`
-		}{
-			Event:   "Panic",
-			Message: msg,
-		}
+// 	if r := recover(); r != nil {
+// 		msgData := struct {
+// 			Event   string
+// 			Message interface{} `json:"payload"`
+// 		}{
+// 			Event:   "Panic",
+// 			Message: msg,
+// 		}
 
-		panicData := struct {
-			Recover    interface{}
-			DebugStack string
-		}{
-			Recover:    r,
-			DebugStack: string(debug.Stack()),
-		}
+// 		panicData := struct {
+// 			Recover    interface{}
+// 			DebugStack string
+// 		}{
+// 			Recover:    r,
+// 			DebugStack: string(debug.Stack()),
+// 		}
 
-		s.logM.Error(bpLogCenterModel.LoggerRequest{
-			Tags:    utils.TAGS_PANIC,
-			Process: utils.PROCESS_PANIC_LOG,
-			Param:   msgData,
-			Panic:   panicData,
-		})
-	}
-}
+// 		s.logM.Error(bpLogCenterModel.LoggerRequest{
+// 			Tags:    utils.TAGS_PANIC,
+// 			Process: utils.PROCESS_PANIC_LOG,
+// 			Param:   msgData,
+// 			Panic:   panicData,
+// 		})
+// 	}
+// }
 
-func (s serviceBus) AppinsightMonitorLog(als model.AppinsightLogStruct, message topic.MessageResponse, errProp model.ErrorProps) error {
-	var msg map[string]interface{}
-	err := json.Unmarshal(message.Data, &msg)
-	if err != nil {
-		return err
-	}
+// func (s serviceBus) AppinsightMonitorLog(als model.AppinsightLogStruct, message topic.MessageResponse, errProp model.ErrorProps) error {
+// 	var msg map[string]interface{}
+// 	err := json.Unmarshal(message.Data, &msg)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	if errProp.Error != nil {
-		msgData := model.LogFormatStruct{
-			Event:     "Exception",
-			EventType: als.EventType,
-			Source:    als.Source,
-			Message:   msg,
-		}
+// 	if errProp.Error != nil {
+// 		msgData := model.LogFormatStruct{
+// 			Event:     "Exception",
+// 			EventType: als.EventType,
+// 			Source:    als.Source,
+// 			Message:   msg,
+// 		}
 
-		errData := model.LogErrorStruct{
-			MessageError: errProp.Error.Error(),
-			FileError:    errProp.FileError,
-			LineError:    errProp.LineError,
-		}
+// 		errData := model.LogErrorStruct{
+// 			MessageError: errProp.Error.Error(),
+// 			FileError:    errProp.FileError,
+// 			LineError:    errProp.LineError,
+// 		}
 
-		s.logM.Error(bpLogCenterModel.LoggerRequest{
-			TxID:    als.TxID,
-			Tags:    utils.TAGS_LOG,
-			Process: utils.PROCESS_APP_LOG,
-			Error:   errData,
-			Param:   msgData,
-		})
+// 		s.logM.Error(bpLogCenterModel.LoggerRequest{
+// 			TxID:    als.TxID,
+// 			Tags:    utils.TAGS_LOG,
+// 			Process: utils.PROCESS_APP_LOG,
+// 			Error:   errData,
+// 			Param:   msgData,
+// 		})
 
-	} else {
-		msgData := model.LogFormatStruct{
-			Event:     als.Event,
-			EventType: als.EventType,
-			Source:    als.Source,
-			Message:   msg,
-		}
+// 	} else {
+// 		msgData := model.LogFormatStruct{
+// 			Event:     als.Event,
+// 			EventType: als.EventType,
+// 			Source:    als.Source,
+// 			Message:   msg,
+// 		}
 
-		switch {
-		case utils.ContainsEventType(als.EventType, utils.EventTypeRequestStruct), utils.ContainsEventType(als.EventType, utils.EventTypeResponseStruct):
-			s.logM.Info(bpLogCenterModel.LoggerRequest{
-				TxID:    als.TxID,
-				Tags:    utils.TAGS_LOG,
-				Process: utils.PROCESS_APP_LOG,
-				Param:   msgData,
-			})
+// 		switch {
+// 		case utils.ContainsEventType(als.EventType, utils.EventTypeRequestStruct), utils.ContainsEventType(als.EventType, utils.EventTypeResponseStruct):
+// 			s.logM.Info(bpLogCenterModel.LoggerRequest{
+// 				TxID:    als.TxID,
+// 				Tags:    utils.TAGS_LOG,
+// 				Process: utils.PROCESS_APP_LOG,
+// 				Param:   msgData,
+// 			})
 
-		default:
-			return errors.New("appinsight monitor log event type not found")
-		}
-	}
-	return nil
-}
+// 		default:
+// 			return errors.New("appinsight monitor log event type not found")
+// 		}
+// 	}
+// 	return nil
+// }

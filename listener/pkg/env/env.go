@@ -23,7 +23,7 @@ type env struct {
 	AAD_SP_CLIENT_SECRET string
 	AAD_SP_CLIENT_SCOPE  string
 
-	APP_INSIGHTS_KEY               string
+	APP_INSIGHTS_KEY string
 
 	AZURE_ACCOUNT_NAME        string
 	AZURE_ACCOUNT_KEY         string
@@ -38,7 +38,10 @@ type env struct {
 
 	EMAIL_FROM string
 
-	TEMP_PATH     string
+	TEMP_PATH string
+
+	API_1 string
+	API_2 string
 	// more...
 }
 

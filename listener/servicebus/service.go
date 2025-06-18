@@ -1,6 +1,7 @@
 package servicebus
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,12 +11,14 @@ import (
 	"go-stater-listener/pkg/utils"
 	"runtime/debug"
 
+	"net/http"
+
 	bpLogCenter "gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/log_center/logx"
 	bpLogCenterModel "gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/log_center/model"
 
-	"gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/service_bus/topic"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
+	"gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/service_bus/topic"
 )
 
 type serviceBus struct {
@@ -47,48 +50,73 @@ func (s serviceBus) CallProcess(message topic.MessageResponse) (als model.Appins
 		return
 	}
 
-	switch {
-	case utils.ContainsEventType(eventType, utils.EventTypeRequestStruct):
-		req := model.RequestData{}
+	fmt.Println("")
+	fmt.Println("eventType:", eventType)
+	fmt.Println("")
+
+	switch eventType {
+	case "event_created":
+		req := model.RequestEventCreate{}
 		err = json.Unmarshal(message.Data, &req)
 		if err != nil {
 			errProp = utils.ErrorData(err)
 			return
 		}
 
-		als = model.AppinsightLogStruct{
-			TxID:      req.TxID,
-			Event:     "Request",
-			EventType: eventType,
-			Source:    req.Source,
+		// Simulate sending the event data to an external API
+		url := fmt.Sprintf("%s/%s", env.Env().API_1, "events")
+		eventData := map[string]interface{}{
+			"eventName":      req.EventName,
+			"price":          req.Price,
+			"maxParticipant": req.MaxParticipant,
 		}
 
-		err := s.RequestProcess(eventType, req)
-		if err.Error != nil {
-			errProp = err
-			return
-		}
-
-	case utils.ContainsEventType(eventType, utils.EventTypeResponseStruct):
-		res := model.ResponseData{}
-		err = json.Unmarshal(message.Data, &res)
+		body, err := json.Marshal(eventData)
 		if err != nil {
 			errProp = utils.ErrorData(err)
 			return
 		}
 
-		als = model.AppinsightLogStruct{
-			TxID:      res.TxID,
-			Event:     "Response",
-			EventType: eventType,
-			Source:    res.Source,
+		header := http.Header{
+			"Accept":       []string{"application/json;odata=verbose"},
+			"Content-Type": []string{"application/json"},
 		}
 
-		err := s.ResponseProcess(eventType, message)
-		if err.Error != nil {
-			errProp = err
+		client := &http.Client{}
+		reqH, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			fmt.Println("Error creating request:", err)
+		}
+
+		reqH.Header = header
+
+		res, err := client.Do(reqH)
+		if err != nil {
+			fmt.Println("Error making request:", err)
+		}
+		defer res.Body.Close()
+
+		fmt.Println("API Response:", res)
+
+	case "event_updated":
+		req := model.RequestEventCreate{}
+		err = json.Unmarshal(message.Data, &req)
+		if err != nil {
+			errProp = utils.ErrorData(err)
 			return
 		}
+
+		fmt.Println("event_updated:", req)
+
+	case "participant_enrolled":
+		req := model.RequestEventCreate{}
+		err = json.Unmarshal(message.Data, &req)
+		if err != nil {
+			errProp = utils.ErrorData(err)
+			return
+		}
+
+		fmt.Println("participant_enrolled:", req)
 
 	default:
 		errProp = utils.ErrorData(errors.New("call process event type not found"))

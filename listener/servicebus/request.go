@@ -3,6 +3,7 @@ package servicebus
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go-stater-listener/domain/model"
 	"go-stater-listener/pkg/utils"
 )
@@ -15,11 +16,13 @@ func (s serviceBus) RequestProcess(eventType string, req model.RequestData) mode
 			return utils.ErrorData(err)
 		}
 
-		props := map[string]interface{}{
-			"eventType": "STARTER_EVENT_RESPONSE",
-		}
+		fmt.Println("Request Data:", string(data))
 
-		s.topic.Emit(data, props)
+		// props := map[string]interface{}{
+		// 	"eventType": "STARTER_EVENT_RESPONSE",
+		// }
+
+		// s.topic.Emit(data, props)
 
 	default:
 		return utils.ErrorData(errors.New("request process event type not found"))

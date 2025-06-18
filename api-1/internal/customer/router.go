@@ -7,8 +7,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
-
-	"gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/guard"
 )
 
 func Router(r fiber.Router, db *gorm.DB, ai appinsightsx.Appinsightsx) {
@@ -18,7 +16,7 @@ func Router(r fiber.Router, db *gorm.DB, ai appinsightsx.Appinsightsx) {
 	service := NewCustomerService(repository)
 	handler := NewCustomerHandler(service, validate, ai)
 
-	groupRoute := r.Group("/customer", guard.ADVerifyToken())
-	groupRoute.Get("", utils.CheckRolesStarterHandler, handler.GetCustomerAll)
+	groupRoute := r.Group("/customer")
+	groupRoute.Get("", handler.GetCustomerAll)
 	groupRoute.Post("", handler.InsertCustomer)
 }

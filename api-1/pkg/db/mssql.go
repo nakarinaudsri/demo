@@ -1,7 +1,9 @@
 package db
 
 import (
+	"context"
 	"fmt"
+	"go-starter-api/domain/entity"
 	"go-starter-api/pkg/env"
 
 	_ "gitlab.com/banpugroup/banpucoth/itsddev/library/golang/go-azure-sdk.git/azuread"
@@ -33,4 +35,32 @@ func GetDB() (*gorm.DB, error) {
 	})
 
 	return db, nil
+}
+
+func Migrate() {
+	g := gen.NewGenerator(gen.Config{
+		OutPath: "./query",
+		Mode:    gen.WithoutContext | gen.WithDefaultQuery, // generate mode
+	})
+
+	db, _ := GetDB()
+	g.UseDB(db) // reuse your gorm db
+
+	db.Migrator().DropTable(
+	// &entity.EventsModel{},
+
+	)
+	db.AutoMigrate(
+		&entity.EventsModel{},
+		&entity.ParticipantModel{},
+	)
+
+	g.ApplyInterface(func(Querier) { context.TODO() },
+		entity.EventsModel{},
+		entity.ParticipantModel{},
+	)
+
+	// Generate the code
+	g.Execute()
+
 }
